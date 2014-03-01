@@ -1,51 +1,154 @@
 #!/usr/bin/env python
 
+############################################
+# Logging
+############################################
+import logging, sys, os
+progname = os.path.basename(sys.argv[0])
+def _init_log():
+    name = progname
+    x = logging.getLogger(name)
+    x.setLevel(logging.INFO)
+    # x.setLevel(logging.DEBUG)
+    h = logging.StreamHandler()
+    f = logging.Formatter("%(name)s (%(funcName)s:%(lineno)d) :: %(message)s")
+    # f = logging.Formatter("%(message)s")
+    h.setFormatter(f)
+    x.addHandler(h)
+    return x
+
+x = _init_log()
+
+############################################
+# Argument parsing
+############################################
+import argparse
+desc = '''Non Disturbing Notification Daemon'''
+p = argparse.ArgumentParser(description=desc)
+p.add_argument("--debug", help="debug mode", action="store_true")
+
+args = p.parse_args()
+if args.debug:
+    x.setLevel(logging.DEBUG)
+
+x.debug("Args: %s", args)
+
 import dbus, gtk, urllib, urlparse
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 
+    
 class MyDBUSService(dbus.service.Object):
     _id = 0
     
     def __init__(self):
-        bus_name = dbus.service.BusName('org.freedesktop.Notifications', bus=dbus.SessionBus())
-        dbus.service.Object.__init__(self, bus_name, '/org/freedesktop/Notifications')
-
+        bus_name = dbus.service.BusName(
+            'org.freedesktop.Notifications',
+            bus=dbus.SessionBus())
+        dbus.service.Object.__init__(self, bus_name,
+            '/org/freedesktop/Notifications')
+        self.gui()
   
     @dbus.service.method("org.freedesktop.Notifications",
                          in_signature='susssasa{ss}i',
                          out_signature='u')
     def Notify(self, app_name, notification_id, app_icon,
-               summary, body, actions, hints, expire_timeout):
-        print "--2--"
-        msg = "msg: app %s, id %s, icon %s, tout %d\n" % (app_name, notification_id, app_icon, expire_timeout)
-        msg += "     sum %s, body %s\n" % (summary, body)
-        msg += "     hints" + str(hints.keys())
-        print msg
-        output.set_label(msg)
+               summary, body, actions, hints, tout):
         if 'image-data' in hints:
-            set_image1(hints['image-data'])
+            pb = pb_from_data(hints['image-data'])
         elif 'image-path' in hints:
-            set_image2(hints['image-path'])
+            pb = pb_from_icon_name(hints['image-path'])
         elif app_icon:
-            set_image2(app_icon)
+            pb = pb_from_icon_name(app_icon)
         elif 'icon_data' in hints:
-            set_image1(hints['icon_data'])
+            pb = pb_from_data(hints['icon_data'])
         else:
-            icon.set_from_pixbuf(None)
+            pb = None
+        try:
+            urgency = int(hints['urgency'])
+        except:
+            urgency = 0
         self._id += 1
+        self.add_notification(self._id, summary, body, urgency, pb,
+            app_name, tout)
         return self._id
 
   
 
-    @dbus.service.method("org.freedesktop.Notifications", in_signature='', out_signature='ssss')
+    @dbus.service.method("org.freedesktop.Notifications",
+                         in_signature='', out_signature='ssss')
     def GetServerInformation(self):
-        print "GetServerInformation"
+        x.debug("GetServerInformation")
         return ("statnot", "http://code.k2h.se", "0.0.2", "1")
 
 
-def set_image1(data):
-    print "set_image1"
+    def gui(self):
+        self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
+        self.window.set_title("TreeViewColumn Example")
+        self.window.set_size_request(210, 220)
+        self.window.connect("delete_event", self.delete_event)
+
+        vbox = gtk.VBox(False, 5) 
+        sw = gtk.ScrolledWindow()
+        sw.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+        
+        self.liststore = gtk.ListStore(
+            int,            # id
+            gtk.gdk.Pixbuf, # icon
+            int,            # timeout
+            int,            # urgency
+            str,            # summary
+            str,            # body
+            str,            # sender app name
+            str             # extra stuff, unused currently
+        )
+        self.COL_ID = 0
+        self.COL_PB = 1
+        self.COL_TOUT = 2
+        self.COL_URGENCY = 3
+        self.COL_SUMMARY = 4
+        self.COL_BODY = 5
+        self.COL_SENDER = 6
+
+        self.treeview = gtk.TreeView(self.liststore)
+        
+        self.tvcolumn = gtk.TreeViewColumn('I')
+        cr = gtk.CellRendererPixbuf()
+        self.tvcolumn.pack_start(cr, False)
+        self.tvcolumn.set_attributes(cr, pixbuf = self.COL_PB)
+        self.treeview.append_column(self.tvcolumn)
+        
+        self.tvcolumn1 = gtk.TreeViewColumn('Msg')
+        cr = gtk.CellRendererText()
+        self.tvcolumn1.pack_start(cr, True)
+        self.tvcolumn1.set_cell_data_func(cr, self.render_msg)
+        self.treeview.append_column(self.tvcolumn1)
+
+        sw.add_with_viewport(self.treeview)
+        vbox.pack_start(sw, True, True, 0)
+        self.window.add(vbox)
+        self.window.show_all()
+
+    def add_notification(self, id, summary, body, urgency, pb,
+            sender, tout):
+        x.debug("'%s %s' from %s, urg %d, no %d",
+                summary, body, sender, urgency, id)
+        try:
+            self.liststore.append([id, pb, tout, urgency,
+                                   summary, body, sender, ''])
+        except Exception as e:
+            print "err", e
+        
+    def render_msg(self, column, cell, model, iter):
+        s = model.get_value(iter, self.COL_SUMMARY)
+        b = model.get_value(iter, self.COL_BODY)
+        mup = "%s\n<i>%s</i>" % (s, b)
+        cell.set_property('markup', mup)
+
+    def delete_event(self, win):
+        gtk.main_quit()
+        
+def pb_from_data(data):
     w = data[0]
     h = data[1]
     r = data[2]
@@ -54,45 +157,31 @@ def set_image1(data):
     c = data[5]
     d = data[6]
     d = "".join(chr(b) for b in d)
-    pb = gtk.gdk.pixbuf_new_from_data(d,
+    return gtk.gdk.pixbuf_new_from_data(d,
         gtk.gdk.COLORSPACE_RGB, a, b, w, h, r)
-    icon.set_from_pixbuf(pb)
 
 
-def set_image2(app_icon):
+def pb_from_icon_name(app_icon):
     icon_theme = gtk.icon_theme_get_default()
     try:
         pb = icon_theme.load_icon(app_icon, 24, 0)
-        icon.set_from_pixbuf(pb)
-        return
+        return pb
     except Exception as e:
-        print "can't load icon", e
+        pass
 
     fname = urllib.unquote(urlparse.urlparse(app_icon).path)
     try:
         pb = gtk.gdk.pixbuf_new_from_file_at_size(fname, 24, 24)
-        icon.set_from_pixbuf(pb)
-        return
+        return pb
     except Exception as e:
-        print "can't load icon", e
+        pass
 
-    # get broken icon
-    icon.set_from_icon_name(app_icon, gtk.ICON_SIZE_SMALL_TOOLBAR)
+    return None
 
-    
     
 DBusGMainLoop(set_as_default=True)
 myservice = MyDBUSService()
 
-win = gtk.Window()
-win.connect("delete_event", lambda w,e:gtk.main_quit())
-vbox = gtk.VBox()
-icon = gtk.Image()
-vbox.pack_start(icon, False, True, 0)
-output = gtk.Label("dddd")
-vbox.pack_start(output, True, True, 0)
-win.add(vbox)
-win.show_all()
 gtk.main()
 
 
