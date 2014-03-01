@@ -23,13 +23,14 @@ class MyDBUSService(dbus.service.Object):
         msg += "     hints" + str(hints.keys())
         print msg
         output.set_label(msg)
-        try:
+        if 'image-data' in hints:
             set_image1(hints['image-data'])
-        except:
-            try:
-                set_image1(hints['icon_data'])
-            except:
-                pass
+        elif 'icon_data' in hints:
+            set_image1(hints['icon_data'])
+        elif app_icon:
+            icon.set_from_icon_name(app_icon, gtk.ICON_SIZE_SMALL_TOOLBAR)
+        else:
+            icon.set_from_pixbuf(None)
         _id += 1
         return _id
 
