@@ -25,10 +25,12 @@ class MyDBUSService(dbus.service.Object):
         output.set_label(msg)
         if 'image-data' in hints:
             set_image1(hints['image-data'])
+        elif 'image-path' in hints:
+            set_image2(hints['image-path'])
+        elif app_icon:
+            set_image2(app_icon)
         elif 'icon_data' in hints:
             set_image1(hints['icon_data'])
-        elif app_icon:
-            icon.set_from_icon_name(app_icon, gtk.ICON_SIZE_SMALL_TOOLBAR)
         else:
             icon.set_from_pixbuf(None)
         _id += 1
@@ -43,6 +45,7 @@ class MyDBUSService(dbus.service.Object):
 
 
 def set_image1(data):
+    print "set_image1"
     w = data[0]
     h = data[1]
     r = data[2]
@@ -55,7 +58,28 @@ def set_image1(data):
         gtk.gdk.COLORSPACE_RGB, a, b, w, h, r)
     icon.set_from_pixbuf(pb)
 
-        
+
+def set_image2(app_icon):
+    icon_theme = gtk.icon_theme_get_default()
+    try:
+        pb = icon_theme.load_icon(app_icon, 24, 0)
+        icon.set_from_pixbuf(pb)
+        return
+    except Exception as e:
+        print "can't load icon", e
+
+    try:
+        pb = gtk.gdk.pixbuf_new_from_file_at_size(app_icon, 24, 24)
+        icon.set_from_pixbuf(pb)
+        return
+    except Exception as e:
+        print "can't load icon", e
+
+    # get broken icon
+    icon.set_from_icon_name(app_icon, gtk.ICON_SIZE_SMALL_TOOLBAR)
+
+    
+    
 DBusGMainLoop(set_as_default=True)
 myservice = MyDBUSService()
 
