@@ -5,6 +5,8 @@ import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 
 class MyDBUSService(dbus.service.Object):
+    _id = 0
+    
     def __init__(self):
         bus_name = dbus.service.BusName('org.freedesktop.Notifications', bus=dbus.SessionBus())
         dbus.service.Object.__init__(self, bus_name, '/org/freedesktop/Notifications')
@@ -19,8 +21,15 @@ class MyDBUSService(dbus.service.Object):
         msg = "msg: app %s, id %s, icon %s, tout %d\n" % (app_name, notification_id, app_icon, expire_timeout)
         msg += "     sum %s, body %s\n" % (summary, body)
         msg += "     hints" + str(hints.keys())
-        print msg, hints
+        print msg
         output.set_label(msg)
+        try:
+            set_image1(hints['image-data'])
+        except:
+            try:
+                set_image1(hints['icon_data'])
+            except:
+                pass
         _id += 1
         return _id
 
@@ -31,6 +40,20 @@ class MyDBUSService(dbus.service.Object):
         print "GetServerInformation"
         return ("statnot", "http://code.k2h.se", "0.0.2", "1")
 
+
+def set_image1(data):
+    w = data[0]
+    h = data[1]
+    r = data[2]
+    a = bool(data[3])
+    b = data[4]
+    c = data[5]
+    d = data[6]
+    d = "".join(chr(b) for b in d)
+    pb = gtk.gdk.pixbuf_new_from_data(d,
+        gtk.gdk.COLORSPACE_RGB, a, b, w, h, r)
+    icon.set_from_pixbuf(pb)
+
         
 DBusGMainLoop(set_as_default=True)
 myservice = MyDBUSService()
@@ -38,9 +61,10 @@ myservice = MyDBUSService()
 win = gtk.Window()
 win.connect("delete_event", lambda w,e:gtk.main_quit())
 vbox = gtk.VBox()
-
+icon = gtk.Image()
+vbox.pack_start(icon, False, True, 0)
 output = gtk.Label("dddd")
-vbox.pack_start(output, False, True, 0)
+vbox.pack_start(output, True, True, 0)
 win.add(vbox)
 win.show_all()
 gtk.main()
