@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import dbus, gtk
+import dbus, gtk, urllib, urlparse
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 
@@ -33,8 +33,8 @@ class MyDBUSService(dbus.service.Object):
             set_image1(hints['icon_data'])
         else:
             icon.set_from_pixbuf(None)
-        _id += 1
-        return _id
+        self._id += 1
+        return self._id
 
   
 
@@ -68,8 +68,9 @@ def set_image2(app_icon):
     except Exception as e:
         print "can't load icon", e
 
+    fname = urllib.unquote(urlparse.urlparse(app_icon).path)
     try:
-        pb = gtk.gdk.pixbuf_new_from_file_at_size(app_icon, 24, 24)
+        pb = gtk.gdk.pixbuf_new_from_file_at_size(fname, 24, 24)
         icon.set_from_pixbuf(pb)
         return
     except Exception as e:
