@@ -121,7 +121,7 @@ class MyDBUSService(dbus.service.Object):
         
         self.tvcolumn1 = gtk.TreeViewColumn('Msg')
         cr = gtk.CellRendererText()
-        self.tvcolumn1.set_property('min-width', 150)
+        # self.tvcolumn1.set_property('min-width', 150)
         self.tvcolumn1.pack_start(cr, True)
         self.tvcolumn1.set_cell_data_func(cr, self.render_msg)
         self.treeview.append_column(self.tvcolumn1)
@@ -189,11 +189,14 @@ class MyDBUSService(dbus.service.Object):
         self.statusicon.set_tooltip(ttip)
         
     def render_msg(self, column, cell, model, iter):
+        id = model.get_value(iter, self.COL_ID)
         s = model.get_value(iter, self.COL_SUMMARY)
         b = model.get_value(iter, self.COL_BODY)
+        w = column.get_width() - 15
+        x.debug("%d: wrap width %d, %s", id, w, s)
         mup = "%s\n<i>%s</i>" % (s, b)
         cell.set_property('markup', mup)
-        cell.set_property('wrap_width', column.get_width() - 10)
+        cell.set_property('wrap_width', w)
         cell.set_property('wrap_mode', pango.WRAP_WORD)
         # cell.set_property("ellipsize", pango.ELLIPSIZE_END)
         # cell.set_property("ellipsize-set", True)
