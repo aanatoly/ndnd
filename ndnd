@@ -128,9 +128,42 @@ class MyDBUSService(dbus.service.Object):
 
         sw.add(self.treeview)
         vbox.pack_start(sw, True, True, 0)
+        vbox.pack_start(self.toolbar_new(), False, True, 0)
         self.window.add(vbox)
         self.window.show_all()
+        self.statusicon_new()
 
+    def toolbar_new(self):
+        toolbar = gtk.Toolbar()
+        
+        sort_b = gtk.ToolButton(gtk.STOCK_SORT_ASCENDING)
+        sort_b.connect("clicked", self.toolbar_sort_cb)
+        toolbar.insert(sort_b, 0)
+
+        clear_b = gtk.ToolButton(gtk.STOCK_CLEAR)
+        clear_b.connect("clicked", self.toolbar_clear_cb)
+        toolbar.insert(clear_b, 1)
+
+        return toolbar
+        
+    def toolbar_sort_cb(self, widget):
+        x.debug("sort items")
+
+    def toolbar_clear_cb(self, widget):
+        x.debug("clear items")
+        u = 100
+        for r in self.liststore:
+            if u > r[self.COL_URGENCY]:
+                u = r[self.COL_URGENCY]
+        if u == 100:
+            return
+        x.debug("clear %d urgency", u)
+        for r in self.liststore:
+            if r[self.COL_URGENCY] == u:
+                self.liststore.remove(r.iter)
+    
+        
+    def statusicon_new(self):
         self.statusicon = gtk.StatusIcon()
         self.statusicon.set_from_stock(gtk.STOCK_HOME) 
         self.statusicon.connect("popup-menu", self.statusicon_right_click_event)
