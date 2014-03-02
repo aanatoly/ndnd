@@ -84,7 +84,7 @@ class MyDBUSService(dbus.service.Object):
 
     def gui(self):
         self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
-        self.window.set_title("TreeViewColumn Example")
+        self.window.set_title("ndnd")
         self.window.set_size_request(210, 220)
         self.window.connect("delete_event", self.delete_event)
 
@@ -129,6 +129,46 @@ class MyDBUSService(dbus.service.Object):
         self.window.add(vbox)
         self.window.show_all()
 
+        self.statusicon = gtk.StatusIcon()
+        self.statusicon.set_from_stock(gtk.STOCK_HOME) 
+        self.statusicon.connect("popup-menu", self.statusicon_right_click_event)
+        self.statusicon.connect("activate", self.statusicon_activate_event)
+        self.statusicon.set_tooltip("ndnd")
+
+    def statusicon_activate_event(self, icon):
+        if self.window.flags() & gtk.MAPPED:
+            self.window.hide()
+        else:
+            self.window.show()
+            
+    def statusicon_right_click_event(self, icon, button, time):
+        menu = gtk.Menu()
+
+        about = gtk.MenuItem("About")
+        quit = gtk.MenuItem("Quit")
+        
+        about.connect("activate", self.show_about_dialog)
+        quit.connect("activate", gtk.main_quit)
+        
+        menu.append(about)
+        menu.append(quit)
+        
+        menu.show_all()
+        
+        menu.popup(None, None, gtk.status_icon_position_menu,
+                   button, time, self.statusicon)
+        
+    def show_about_dialog(self, widget):
+        about_dialog = gtk.AboutDialog()
+
+        about_dialog.set_destroy_with_parent(True)
+        about_dialog.set_name("ndnd")
+        about_dialog.set_version("1.0")
+        about_dialog.set_authors(["Anatoly Asviyan <aanatoly@gmail.com>"])
+        		
+        about_dialog.run()
+        about_dialog.destroy()
+        
     def add_notification(self, id, summary, body, urgency, pb,
             sender, tout):
         x.debug("'%s %s' from %s, urg %d, no %d",
@@ -138,6 +178,11 @@ class MyDBUSService(dbus.service.Object):
                                    summary, body, sender, ''])
         except Exception as e:
             print "err", e
+        x.debug("note num %s", len(self.liststore))
+        ttip = "ndnd"
+        if len(self.liststore):
+            ttip += "\n%s notifications" % len(self.liststore)
+        self.statusicon.set_tooltip(ttip)
         
     def render_msg(self, column, cell, model, iter):
         s = model.get_value(iter, self.COL_SUMMARY)
