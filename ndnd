@@ -169,12 +169,17 @@ class MyDBUSService(dbus.service.Object):
         self.statusicon.connect("popup-menu", self.statusicon_right_click_event)
         self.statusicon.connect("activate", self.statusicon_activate_event)
         self.statusicon.set_tooltip("ndnd")
-
+        self.x = 0
+        self.y = 0
+        
     def statusicon_activate_event(self, icon):
         if self.window.flags() & gtk.MAPPED:
+            (self.x, self.y) = self.window.get_position()
             self.window.hide()
         else:
+            self.window.move(self.x, self.y)
             self.window.show()
+
             
     def statusicon_right_click_event(self, icon, button, time):
         menu = gtk.Menu()
@@ -238,7 +243,8 @@ class MyDBUSService(dbus.service.Object):
         # cell.set_property("ellipsize-set", True)
         
     def delete_event(self, win, ev):
-        gtk.main_quit()
+        win.hide_on_delete()
+        # gtk.main_quit()
         
 def pb_from_data(data):
     w = data[0]
