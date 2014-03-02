@@ -161,7 +161,7 @@ class MyDBUSService(dbus.service.Object):
         for r in self.liststore:
             if r[self.COL_URGENCY] == u:
                 self.liststore.remove(r.iter)
-    
+        self.set_tooltip()
         
     def statusicon_new(self):
         self.statusicon = gtk.StatusIcon()
@@ -216,6 +216,9 @@ class MyDBUSService(dbus.service.Object):
         except Exception as e:
             print "err", e
         x.debug("note num %s", len(self.liststore))
+        self.set_tooltip()
+
+    def set_tooltip(self):
         ttip = "ndnd"
         if len(self.liststore):
             ttip += "\n%s notifications" % len(self.liststore)
