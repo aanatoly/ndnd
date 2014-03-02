@@ -201,7 +201,7 @@ class MyDBUSService(dbus.service.Object):
         # cell.set_property("ellipsize", pango.ELLIPSIZE_END)
         # cell.set_property("ellipsize-set", True)
         
-    def delete_event(self, win):
+    def delete_event(self, win, ev):
         gtk.main_quit()
         
 def pb_from_data(data):
