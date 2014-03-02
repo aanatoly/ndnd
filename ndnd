@@ -54,7 +54,8 @@ class MyDBUSService(dbus.service.Object):
                          out_signature='u')
     def Notify(self, app_name, notification_id, app_icon,
                summary, body, actions, hints, tout):
-        x.debug("here")
+        summary = summary.strip()
+        body = body.strip()
         if 'image-data' in hints:
             pb = pb_from_data(hints['image-data'])
         elif 'image-path' in hints:
@@ -235,10 +236,14 @@ class MyDBUSService(dbus.service.Object):
         b = model.get_value(iter, self.COL_BODY)
         w = column.get_width() - 15
         x.debug("%d: wrap width %d, %s", id, w, s)
-        mup = "%s\n<i>%s</i>" % (s, b)
+        mup = s
+        if b:
+            mup += "\n<i>%s</i>" % b
         cell.set_property('markup', mup)
         cell.set_property('wrap_width', w)
         cell.set_property('wrap_mode', pango.WRAP_WORD)
+        cell.set_property('yalign', 0.5)
+        cell.set_property('ypad', 0)
         # cell.set_property("ellipsize", pango.ELLIPSIZE_END)
         # cell.set_property("ellipsize-set", True)
         
