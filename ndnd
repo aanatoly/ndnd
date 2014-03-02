@@ -33,7 +33,7 @@ if args.debug:
 
 x.debug("Args: %s", args)
 
-import dbus, gtk, urllib, urlparse
+import dbus, gtk, pango, urllib, urlparse
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 
@@ -85,7 +85,7 @@ class MyDBUSService(dbus.service.Object):
     def gui(self):
         self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
         self.window.set_title("ndnd")
-        self.window.set_size_request(210, 220)
+        self.window.set_size_request(220, 220)
         self.window.connect("delete_event", self.delete_event)
 
         vbox = gtk.VBox(False, 5) 
@@ -120,6 +120,7 @@ class MyDBUSService(dbus.service.Object):
         
         self.tvcolumn1 = gtk.TreeViewColumn('Msg')
         cr = gtk.CellRendererText()
+        self.tvcolumn1.set_property('min-width', 150)
         self.tvcolumn1.pack_start(cr, True)
         self.tvcolumn1.set_cell_data_func(cr, self.render_msg)
         self.treeview.append_column(self.tvcolumn1)
@@ -189,7 +190,11 @@ class MyDBUSService(dbus.service.Object):
         b = model.get_value(iter, self.COL_BODY)
         mup = "%s\n<i>%s</i>" % (s, b)
         cell.set_property('markup', mup)
-
+        cell.set_property('wrap_width', column.get_width() - 20)
+        cell.set_property('wrap_mode', pango.WRAP_WORD)
+        # cell.set_property("ellipsize", pango.ELLIPSIZE_END)
+        # cell.set_property("ellipsize-set", True)
+        
     def delete_event(self, win):
         gtk.main_quit()
         
