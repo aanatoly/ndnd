@@ -445,8 +445,7 @@ def msg_upd():
     xx['stat'] = stat
     
     if xx['main']:
-        xx['clear'].set_sensitive(bool(len(xx['msgs'])))
-        gui_main_list_upd()
+        gui_main_upd()
     gui_si_upd()
 
     
@@ -521,17 +520,42 @@ xx = {
 # Main window                                                         #
 #######################################################################
 
-def gui_main_list_upd():
+urg_str2num = {
+    'low': 0,
+    'normal': 1,
+    'critical': 2,
+}
+
+urg_num2str = {
+    0: 'low',
+    1: 'normal',
+    2: 'critical',
+}
+
+
+def gui_main_upd():
     if not xx['main']:
         return
+
     for w in xx['list'].get_children():
         w.destroy()
     for m in xx['msgs']:
         w = gui_nmsg(m)
         xx['list'].pack_start(w, False, False, 1)
     xx['list'].show_all()
+
+    xx['clear'].set_sensitive(bool(len(xx['msgs'])))
+    ttip = None
+    for u in [0, 1, 2]:
+        if not xx['stat'][u]:
+            continue
+        ttip = "Clear %d %s notifications" % \
+               (xx['stat'][u], urg_num2str[u])
+        break
+    xx['clear'].set_tooltip_text(ttip)
+
     
-        
+    
 def gui_main_list():
     l = gtk.VBox(False, 0)
     xx['list'] = l
@@ -634,12 +658,10 @@ def gui_si_upd():
     icon = icons[xx['stat']['high']]
     xx['statusicon'].set_from_file(IMG_DIR + icon)
     ttip = ""
-    if xx['stat'][2]:
-        ttip += "%d critical\n" % xx['stat'][2]
-    if xx['stat'][1]:
-        ttip += "%d nnormal\n" % xx['stat'][1]
-    if xx['stat'][0]:
-        ttip += "%d low\n" % xx['stat'][0]
+    for u in [2, 1, 0]:
+        if not xx['stat'][u]:
+            continue
+        ttip += "%d %s\n" % (xx['stat'][u], urg_num2str[u])
     if not ttip:
         ttip = "nothing new"
     ttip = "Notofictions\n" + ttip
