@@ -437,8 +437,12 @@ def msg_upd():
     }
     for m in xx['msgs']:
         u = m['urgency']
-        if u < 0 or u > 2:
+        if u < 0:
             log.warning("BUG: msg's urgency %d", u)
+            u = 0
+        elif u > 2:
+            log.warning("BUG: msg's urgency %d", u)
+            u = 2
         stat[u] += 1
         if stat['high'] < u:
             stat['high'] = u
