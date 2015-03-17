@@ -45,6 +45,26 @@ def test_upd():
                        "action_cmd2": "xmessage \"Msg2 Param1 Param2\""})
     time.sleep(2)
     dbus_close(nid)
+        
+def test_urgency():
+    nid = 0
+    nid = dbus_notify(nid, "My low msg", "BodyLine1\nBodyLine2",
+                      {"urgency": dbus.Byte(0),
+                       "when": dbus.Int64(MILLIS_SINCE_EPOCH),
+                       "image-data": ICON})
+    time.sleep(2)
+    nid = 0
+    nid = dbus_notify(nid, "My normal title", "BodyLine1\nBodyLine2",
+                      {"urgency": dbus.Byte(1),
+                       "when": dbus.Int64(MILLIS_SINCE_EPOCH),
+                       "image-data": ICON})
+    time.sleep(2)
+    nid = 0
+    nid = dbus_notify(nid, "My critical title", "BodyLine1\nBodyLine2",
+                      {"urgency": dbus.Byte(2),
+                       "when": dbus.Int64(MILLIS_SINCE_EPOCH),
+                       "image-data": ICON})
+    time.sleep(2)
 
 
 titles = [
@@ -101,4 +121,5 @@ for arg in sys.argv[1:]:
 # test_upd()
 #test_menu()
 # test_stress(40, 0.2)
-test_stress(2, 1.2)
+# test_stress(2, 1.2)
+test_urgency()
