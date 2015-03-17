@@ -1,23 +1,30 @@
 #!/usr/bin/env python
 
+# TODO:
+# * The window need to open in the right most upper corner
+#   (below the panel) above all the over windows, including the PhoneApp.
+# * The window should not allow changes to its location by the user.
+
 ############################################
 # Logging
 ############################################
 import logging, sys, os
+from datetime import datetime, timedelta
+
 progname = os.path.basename(sys.argv[0])
 def _init_log():
     name = progname
-    x = logging.getLogger(name)
-    x.setLevel(logging.INFO)
-    # x.setLevel(logging.DEBUG)
+    log = logging.getLogger(name)
+    log.setLevel(logging.INFO)
+    # log.setLevel(logging.DEBUG)
     h = logging.StreamHandler()
     f = logging.Formatter("%(name)s (%(funcName)s:%(lineno)d) :: %(message)s")
     # f = logging.Formatter("%(message)s")
     h.setFormatter(f)
-    x.addHandler(h)
-    return x
+    log.addHandler(h)
+    return log
 
-x = _init_log()
+log = _init_log()
 
 ############################################
 # Argument parsing
@@ -29,265 +36,641 @@ p.add_argument("--debug", help="debug mode", action="store_true")
 
 args = p.parse_args()
 if args.debug:
-    x.setLevel(logging.DEBUG)
+    log.setLevel(logging.DEBUG)
 
-x.debug("Args: %s", args)
+log.debug("Args: %s", args)
 
-import dbus, gtk, pango, urllib, urlparse
+import dbus, gtk, gobject,  pango, urllib, urlparse, glib
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
+import signal
 
-    
+
+#######################################################################
+# DBus                                                                #
+#######################################################################
+
 class MyDBUSService(dbus.service.Object):
     _id = 0
-    
-    def __init__(self):
+
+    def __init__(self, notify_cb, close_cb, data):
+        self.notify_cb = notify_cb
+        self.close_cb = close_cb
+        self.data = data
         bus_name = dbus.service.BusName(
             'org.freedesktop.Notifications',
             bus=dbus.SessionBus())
         dbus.service.Object.__init__(self, bus_name,
             '/org/freedesktop/Notifications')
-        self.gui()
-  
+
+
+    def pb_from_data(self, data):
+        w = data[0]
+        h = data[1]
+        r = data[2]
+        a = bool(data[3])
+        b = data[4]
+        c = data[5]
+        d = data[6]
+        d = "".join(chr(b) for b in d)
+        try:
+            return gtk.gdk.pixbuf_new_from_data(d,
+                gtk.gdk.COLORSPACE_RGB, a, b, w, h, r)
+        except:
+            return None
+
+
+
     @dbus.service.method("org.freedesktop.Notifications",
                          in_signature='susssasa{ss}i',
-                         out_signature='u')
-    def Notify(self, app_name, notification_id, app_icon,
-               summary, body, actions, hints, tout):
-        summary = summary.strip()
-        body = body.strip()
-        if 'image-data' in hints:
-            pb = pb_from_data(hints['image-data'])
-        elif 'image-path' in hints:
-            pb = pb_from_icon_name(hints['image-path'])
-        elif app_icon:
-            pb = pb_from_icon_name(app_icon)
-        elif 'icon_data' in hints:
-            pb = pb_from_data(hints['icon_data'])
-        else:
-            pb = None
-        try:
-            urgency = int(hints['urgency'])
-        except:
-            urgency = 0
-        self._id += 1
-        self.add_notification(self._id, summary, body, urgency, pb,
-            app_name, tout)
-        return self._id
+                         out_signature='u',
+                         sender_keyword='sender')
+    def Notify(self, name, notification_id, icon,
+               summary, body, actions, hints, tout, sender):
 
-  
+        log.debug("id %d, icon %s", notification_id, icon)
+        if notification_id == 0:
+            self._id += 1
+            notification_id = self._id
+
+        msg = {
+            'id' : notification_id,
+            'name' : name,
+            'summary' : summary,
+            'body' : body,
+            'actions' : actions,
+            'hints' : hints,
+            'tout' : tout,
+            'sender' : sender
+        }
+
+        # urgency
+        try:
+            msg['urgency'] = int(hints['urgency'])
+            del(hints['urgency'])
+        except:
+            msg['urgency'] = 0
+
+        # icon
+        if 'image-data' in hints:
+            msg['pixbuf'] = self.pb_from_data(hints['image-data'])
+            log.debug("got image-data, converted to %s", msg['pixbuf'])
+            del(hints['image-data'])
+        elif 'icon_data' in hints:
+            msg['pixbuf'] = self.pb_from_data(hints['icon_data'])
+            log.debug("got icon_data, converted to %s", msg['pixbuf'])
+            del(hints['icon_data'])
+        else:
+            msg['pixbuf'] = None
+
+        if 'image-path' in hints:
+            msg['icon'] = hints['image-path']
+            del(hints['image-path'])
+        else:
+            msg['icon'] = icon
+
+        self.notify_cb(self.data, msg)
+
+        return notification_id
+
+
+    @dbus.service.method("org.freedesktop.Notifications",
+                         in_signature='u',
+                         out_signature='')
+    def CloseNotification(self, notification_id):
+        self.close_cb(self.data, notification_id)
+
 
     @dbus.service.method("org.freedesktop.Notifications",
                          in_signature='', out_signature='ssss')
     def GetServerInformation(self):
-        x.debug("GetServerInformation")
+        log.debug("GetServerInformation")
         return ("statnot", "http://code.k2h.se", "0.0.2", "1")
 
 
-    def gui(self):
-        self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
-        self.window.set_title("ndnd")
-        self.window.set_size_request(220, 220)
-        self.window.connect("delete_event", self.delete_event)
+    def NotificationClosed(self, id, reason, dbus_dest):
+        sig = dbus.lowlevel.SignalMessage(
+            '/org/freedesktop/Notifications',
+            'org.freedesktop.Notifications',
+            'NotificationClosed')
+        sig.set_destination(dbus_dest)
+        sig.append(dbus.UInt32(id))
+        sig.append(dbus.UInt32(reason))
+        self.connection.send_message(sig)
 
-        vbox = gtk.VBox(False, 5) 
-        sw = gtk.ScrolledWindow()
-        sw.set_policy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)
-        
-        self.liststore = gtk.ListStore(
-            int,            # id
-            gtk.gdk.Pixbuf, # icon
-            int,            # timeout
-            int,            # urgency
-            str,            # summary
-            str,            # body
-            str,            # sender app name
-            str             # extra stuff, unused currently
-        )
-        self.COL_ID = 0
-        self.COL_PB = 1
-        self.COL_TOUT = 2
-        self.COL_URGENCY = 3
-        self.COL_SUMMARY = 4
-        self.COL_BODY = 5
-        self.COL_SENDER = 6
 
-        self.treeview = gtk.TreeView(self.liststore)
-        
-        self.tvcolumn = gtk.TreeViewColumn('I')
-        cr = gtk.CellRendererPixbuf()
-        self.tvcolumn.pack_start(cr, False)
-        self.tvcolumn.set_attributes(cr, pixbuf = self.COL_PB)
-        self.treeview.append_column(self.tvcolumn)
-        
-        self.tvcolumn1 = gtk.TreeViewColumn('Msg')
-        cr = gtk.CellRendererText()
-        # self.tvcolumn1.set_property('min-width', 150)
-        self.tvcolumn1.pack_start(cr, True)
-        self.tvcolumn1.set_cell_data_func(cr, self.render_msg)
-        self.treeview.append_column(self.tvcolumn1)
+#######################################################################
+# Misc                                                                #
+#######################################################################
 
-        sw.add(self.treeview)
-        vbox.pack_start(sw, True, True, 0)
-        vbox.pack_start(self.toolbar_new(), False, True, 0)
-        self.window.add(vbox)
-        self.window.show_all()
-        self.statusicon_new()
+def str_from_timedelta(ts1, ts2):
 
-    def toolbar_new(self):
-        toolbar = gtk.Toolbar()
-        
-        sort_b = gtk.ToolButton(gtk.STOCK_SORT_ASCENDING)
-        sort_b.connect("clicked", self.toolbar_sort_cb)
-        toolbar.insert(sort_b, 0)
-
-        clear_b = gtk.ToolButton(gtk.STOCK_CLEAR)
-        clear_b.connect("clicked", self.toolbar_clear_cb)
-        toolbar.insert(clear_b, 1)
-
-        return toolbar
-        
-    def toolbar_sort_cb(self, widget):
-        x.debug("sort items")
-
-    def toolbar_clear_cb(self, widget):
-        x.debug("clear items")
-        u = 100
-        for r in self.liststore:
-            if u > r[self.COL_URGENCY]:
-                u = r[self.COL_URGENCY]
-        if u == 100:
-            return
-        x.debug("clear %d urgency", u)
-        for r in self.liststore:
-            if r[self.COL_URGENCY] == u:
-                self.liststore.remove(r.iter)
-        self.set_tooltip()
-        
-    def statusicon_new(self):
-        self.statusicon = gtk.StatusIcon()
-        self.statusicon.set_from_stock(gtk.STOCK_HOME) 
-        self.statusicon.connect("popup-menu", self.statusicon_right_click_event)
-        self.statusicon.connect("activate", self.statusicon_activate_event)
-        self.statusicon.set_tooltip("ndnd")
-        self.x = 0
-        self.y = 0
-        
-    def statusicon_activate_event(self, icon):
-        if self.window.flags() & gtk.MAPPED:
-            (self.x, self.y) = self.window.get_position()
-            self.window.hide()
+    def past(d):
+        if d.days >= 365:
+            return '%d years ago' % (d.days / 365)
+        elif d.days >= 31:
+            return '%d months ago' % (d.days / 31)
+        elif d.days >= 1:
+            return '%d months ago' % (d.days)
+        elif d.seconds >= 3600:
+            return '%d hours ago' % (d.seconds / 3600)
+        elif d.seconds >= 60:
+            return '%d mins ago' % (d.seconds / 60)
+        # elif d.seconds >= 20:
+        #     return '%d sec ago' % (d.seconds)
         else:
-            self.window.move(self.x, self.y)
-            self.window.show()
+            return 'just now'
 
-            
-    def statusicon_right_click_event(self, icon, button, time):
-        menu = gtk.Menu()
 
-        about = gtk.MenuItem("About")
-        quit = gtk.MenuItem("Quit")
-        
-        about.connect("activate", self.show_about_dialog)
-        quit.connect("activate", gtk.main_quit)
-        
-        menu.append(about)
-        menu.append(quit)
-        
-        menu.show_all()
-        
-        menu.popup(None, None, gtk.status_icon_position_menu,
-                   button, time, self.statusicon)
-        
-    def show_about_dialog(self, widget):
-        about_dialog = gtk.AboutDialog()
+    def future(d):
+        if d.days >= 365:
+            return 'in %d years' % (d.days / 365)
+        elif d.days >= 31:
+            return 'in %d months' % (d.days / 31)
+        elif d.days >= 1:
+            return 'in %d months' % (d.days)
+        elif d.seconds >= 3600:
+            return 'in %d hours' % (d.seconds / 3600)
+        elif d.seconds >= 60:
+            return 'in %d mins' % (d.seconds / 60)
+        # elif d.seconds >= 20:
+        #     return 'in %d secs' % (d.seconds)
+        else:
+            return 'just now'
 
-        about_dialog.set_destroy_with_parent(True)
-        about_dialog.set_name("ndnd")
-        about_dialog.set_version("1.0")
-        about_dialog.set_authors(["Anatoly Asviyan <aanatoly@gmail.com>"])
-        		
-        about_dialog.run()
-        about_dialog.destroy()
-        
-    def add_notification(self, id, summary, body, urgency, pb,
-            sender, tout):
-        x.debug("id %d", id)
-        x.debug("'%s %s' from %s, urg %d, no %d, pb %dx%d",
-                summary, body, sender, urgency, id,
-                pb.get_width(), pb.get_height())
+    # log.debug('ts1 %s', ts1)
+    # log.debug('ts2 %s', ts2)
+    diff = ts1 - ts2
+    if diff.total_seconds() < 0:
+        s = past(-diff)
+    else:
+        s = future(diff)
+
+    return s
+
+
+
+#######################################################################
+# GUI                                                                 #
+#######################################################################
+
+main_win_min_height = 420
+main_win_width = 400
+float_win_width = 600
+
+
+def gui_msg_text(msg):
+    l = gtk.Label('')
+    msum = ' '.join(msg['summary'].strip().split())
+    msum = glib.markup_escape_text(msum)
+    mbody = ' '.join(msg['body'].strip().split())
+    mbody = glib.markup_escape_text(mbody)
+    m = '<b>%s</b>\n%s' % (msum, mbody)
+    l.set_markup(m)
+    l.set_justify(gtk.JUSTIFY_LEFT)
+    l.set_alignment(0.0, 0.0)
+    l.set_padding(0, 0)
+    # l.set_single_line_mode(True)
+    l.set_line_wrap(False)
+    l.set_ellipsize(pango.ELLIPSIZE_END)
+    return l
+
+
+def pixbuf_scale_with_ratio(pb, size):
+    log.debug("%s", pb)
+    w = float(pb.get_width())
+    h = float(pb.get_height())
+    log.debug("pb orig size %f %f", w, h)
+    if w != size:
+        wr = 1.0 * w / size
+    else:
+        wr = 1.0
+    if h != size:
+        hr = 1.0 * h / size
+    else:
+        hr = 1.0
+    r = max(wr, hr)
+    w = w / r
+    h = h / r
+    log.debug("scaling pb to %f %f", w, h)
+    return pb.scale_simple(int(w), int(h), gtk.gdk.INTERP_BILINEAR)
+
+
+
+def gui_msg_image(msg):
+    size = 32
+    pb = msg['pixbuf']
+    log.debug("%s", pb)
+    if pb:
         try:
-            self.liststore.append([id, pb, tout, urgency,
-                                   summary, body, sender, ''])
-        except Exception as e:
-            print "err", e
-        x.debug("note num %s", len(self.liststore))
-        self.set_tooltip()
+            pb = pixbuf_scale_with_ratio(pb, size)
+            log.debug("%s", pb)
+            return gtk.image_new_from_pixbuf(pb)
+        except Exception, e:
+            print e
 
-    def set_tooltip(self):
-        ttip = "ndnd"
-        if len(self.liststore):
-            ttip += "\n%s notifications" % len(self.liststore)
-        self.statusicon.set_tooltip(ttip)
-        
-    def render_msg(self, column, cell, model, iter):
-        id = model.get_value(iter, self.COL_ID)
-        s = model.get_value(iter, self.COL_SUMMARY)
-        b = model.get_value(iter, self.COL_BODY)
-        w = column.get_width() - 15
-        x.debug("%d: wrap width %d, %s", id, w, s)
-        mup = s
-        if b:
-            mup += "\n<i>%s</i>" % b
-        cell.set_property('markup', mup)
-        cell.set_property('wrap_width', w)
-        cell.set_property('wrap_mode', pango.WRAP_WORD)
-        cell.set_property('yalign', 0.5)
-        cell.set_property('ypad', 0)
-        # cell.set_property("ellipsize", pango.ELLIPSIZE_END)
-        # cell.set_property("ellipsize-set", True)
-        
-    def delete_event(self, win, ev):
-        win.hide_on_delete()
-        # gtk.main_quit()
-        
-def pb_from_data(data):
-    w = data[0]
-    h = data[1]
-    r = data[2]
-    a = bool(data[3])
-    b = data[4]
-    c = data[5]
-    d = data[6]
-    d = "".join(chr(b) for b in d)
-    return gtk.gdk.pixbuf_new_from_data(d,
-        gtk.gdk.COLORSPACE_RGB, a, b, w, h, r)
-
-
-def pb_from_icon_name(app_icon):
     icon_theme = gtk.icon_theme_get_default()
-    try:
-        pb = icon_theme.load_icon(app_icon, 24, 0)
-        return pb
-    except Exception as e:
-        pass
+    icon = msg['icon'].strip()
 
-    fname = urllib.unquote(urlparse.urlparse(app_icon).path)
-    try:
-        pb = gtk.gdk.pixbuf_new_from_file_at_size(fname, 24, 24)
-        return pb
-    except Exception as e:
-        pass
+    if icon[0:1] == '/':
+        try:
+            fname = urllib.unquote(urlparse.urlparse(icon).path)
+            pb = gtk.gdk.pixbuf_new_from_file_at_size(fname, size, size)
+            return gtk.image_new_from_pixbuf(pb)
+        except:
+            pass
 
-    return None
+    try:
+        pb = icon_theme.load_icon(icon, size, 0)
+    except:
+        pb = icon_theme.load_icon('info', size, 0)
+    return gtk.image_new_from_pixbuf(pb)
+
+
+
+
+def gui_msg_ts(msg):
+    l = gtk.Label('')
+    msg['widget_ts'] = l
+    l.set_justify(gtk.JUSTIFY_LEFT)
+    l.set_alignment(0.0, 0.5)
+    msg['ts'] = datetime.now()
+    m = '<i>%s</i>' % str_from_timedelta(msg['ts'], msg['ts'])
+    l.set_markup(m)
+    return l
+
+
+def gui_run_cmd(b, cmd):
+    try:
+        cmd += " &"
+        log.debug('run %s', cmd)
+        os.system(cmd)
+    except Exception, e:
+        log.warning("cmd '%s' failed, %s", cmd, e)
+
+
+def gui_msg_action_menu(msg):
+    log.debug("here")
+    def popup(menu, event):
+        if event.type == gtk.gdk.BUTTON_PRESS:
+            menu.popup(None, None, None, event.button, event.time)
+            return True
+        return False
+    
+    hints = msg['hints']
+    log.debug("hints %s", hints)
+    menu = gtk.Menu()
+    for i in range(1,10):
+        tk = 'action_title%d' % i
+        ck = 'action_cmd%d' % i
+        log.debug("key %s, inside %s", ck, ck in hints)
+        log.debug("key %s, inside %s", tk, tk in hints)
+        if tk not in hints or ck not in hints:
+            break
+        log.debug("mi %d: %s %s", i, hints[tk], hints[ck])
+        mi = gtk.MenuItem(hints[tk])
+        mi.connect("activate", gui_run_cmd, hints[ck])
+        mi.show()
+        menu.append(mi)
+        
+    ba = gtk.Button()
+    ba.set_name("action")
+    # ba.set_can_focus(False)
+    label = gtk.Label(hints['action_title'])
+    ar = gtk.Arrow(gtk.ARROW_DOWN, gtk.SHADOW_NONE)
+    hb = gtk.HBox(False, 4)
+    hb.pack_start(label, False, False, 0)
+    hb.pack_start(ar, False, False, 0)
+    ba.add(hb)
+    ba.connect_object("event", popup, menu)
+    return ba
+
+
+def gui_msg_action_button(msg):
+    ba = gtk.Button()
+    ba.set_name("action")
+    # ba.set_can_focus(False)
+    ba.set_label(msg['hints']['action_title1'])
+    if 'action_cmd1' in msg['hints']:
+        ba.connect('clicked', gui_run_cmd, msg['hints']['action_cmd1'])
+    return ba
+
+
+def gui_nmsg_close(msg):
+    ix = gtk.Image()
+    ix.set_from_stock(gtk.STOCK_CLOSE, gtk.ICON_SIZE_MENU)
+    ix.set_alignment(0.5, 0.5)
+    ix.set_padding(0, 0)
+    bx = gtk.Button()
+    bx.set_name("close-btn")
+    bx.set_image(ix)
+    bx.set_border_width(0)
+    bx.set_relief(gtk.RELIEF_NONE)
+    # bx.set_can_focus(False)
+    bx.connect_object('clicked', msg_del, msg)
+    a = gtk.Alignment(0.0, 0.0)
+    a.add(bx)
+    return a
+
+
+def gui_nmsg_action(msg):
+    if 'action_title' in msg['hints']:
+        ba = gui_msg_action_menu(msg)
+    elif 'action_title1' in msg['hints']:
+        ba = gui_msg_action_button(msg)
+    else:
+        return None
+    a = gtk.Alignment(0.0, 0.5)
+    a.add(ba)
+    xx['sg'].add_widget(ba)
+    return a
+
+
+def gui_nmsg(msg):
+    log.debug("here")
+    hbox = gtk.HBox(False, 0)
+    
+    w = gui_msg_image(msg)
+    w.set_alignment(0.5, 0.0)
+    w.set_padding(0, 3)
+    hbox.pack_start(w, False, False, 10)
+
+    vbox = gtk.VBox(False, 0)
+    w = gui_msg_text(msg)
+    w.set_alignment(0.0, 0.0)
+    vbox.pack_start(w)
+    w = gui_msg_ts(msg)
+    w.set_alignment(0.0, 0.5)
+    vbox.pack_start(w, False, False, 0)
+    hbox.pack_start(vbox)
+
+    w = gui_nmsg_action(msg)
+    if w:
+        hbox.pack_start(w, False, False, 10)
+
+    w = gui_nmsg_close(msg)
+    # w.set_alignment(0.0, 0.0)
+    hbox.pack_start(w, False, False, 0)
+
+    w = gtk.HSeparator()
+
+    vbox = gtk.VBox(False, 0)
+    vbox.pack_start(hbox)
+    vbox.pack_start(w, False, False, 0)
+    vbox.show_all()
+    vbox.set_name("notification")
+    
+    return vbox
+    
+
+
+#######################################################################
+# Main                                                                #
+#######################################################################
+
+def msg_upd():
+    stat = {
+        0: 0,
+        1: 0,
+        2: 0,
+        'high': -1,
+    }
+    for m in xx['msgs']:
+        u = m['urgency']
+        if u < 0 or u > 2:
+            log.warning("BUG: msg's urgency %d", u)
+        stat[u] += 1
+        if stat['high'] < u:
+            stat['high'] = u
+    xx['stat'] = stat
+    
+    if xx['main']:
+        xx['clear'].set_sensitive(bool(len(xx['msgs'])))
+        gui_main_list_upd()
+    gui_si_upd()
 
     
-DBusGMainLoop(set_as_default=True)
-myservice = MyDBUSService()
+def msg_del_one(msg):
+    xx['dbus'].NotificationClosed(msg['id'], 1, msg['sender'])
+    xx['msgs'].remove(msg)
 
-gtk.main()
+    
+def msg_del(msg):
+    msg_del_one(msg)
+    msg_upd()
+
+    
+def msg_del_by_urgency(wd):
+    def msg_del_by_urgency_real(urgency):
+        i = 0
+        for m in list(xx['msgs']):
+            log.debug("msg urgency %s", m['urgency'])
+            if m['urgency'] != urgency:
+                continue
+            msg_del_one(m)
+            i += 1
+        log.debug("del %d %s notification(s)", i, urgency)
+        return i
+
+    for u in [0, 1, 2]:
+        if msg_del_by_urgency_real(u):
+            break
+
+    msg_upd()
+    
+
+def msg_add(wd, msg):
+    # if it's an update, delete prev one
+    for m in xx['msgs']:
+        if m['id'] == msg['id']:
+            xx['msgs'].remove(m)
+            break
+
+    xx['msgs'].insert(0, msg)
+    msg_upd()
 
 
-# Test with
-# notify-send -a "sababa" --icon=battery-good  \
-#    Test "Battery is normal" -h string:vasya:34 -u low
+def msg_close(wd, msgid):
+    log.debug("req to del a notification %d", msgid)
+    for m in wd['msgs']:
+        if m['id'] == msgid:
+            msg_del(m)
+            break
+
+
+def update_ts_delta(wd):
+    now = datetime.now()
+    for msg in wd['msgs']:
+        m = '<i>%s</i>' % str_from_timedelta(msg['ts'], now)
+        msg['widget_ts'].set_markup(m)
+    return True
+
+
+xwd = None
+
+
+IMG_DIR = 'images/'
+xx = {
+    'main': None,
+    'msgs': [],
+}
+
+
+
+#######################################################################
+# Main window                                                         #
+#######################################################################
+
+def gui_main_list_upd():
+    if not xx['main']:
+        return
+    for w in xx['list'].get_children():
+        w.destroy()
+    for m in xx['msgs']:
+        w = gui_nmsg(m)
+        xx['list'].pack_start(w, False, False, 1)
+    xx['list'].show_all()
+    
+        
+def gui_main_list():
+    l = gtk.VBox(False, 0)
+    xx['list'] = l
+    return l
+
+
+def gui_main_toolbar():
+    tb = gtk.Toolbar()
+    xx['toolbar'] = tb
+    tb.set_style(gtk.TOOLBAR_ICONS)
+    
+    ti = gtk.ToolButton(gtk.STOCK_CLEAR)
+    ti.connect("clicked", msg_del_by_urgency)
+    tb.insert(ti, 0)
+    xx['clear'] = ti
+    
+    ti = gtk.ToolButton(gtk.STOCK_PREFERENCES)
+    tb.insert(ti, 1)
+
+    tb.show_all()
+    return tb
+
+
+def gui_main():
+    w = gtk.Window(gtk.WINDOW_TOPLEVEL)
+    xx['main'] = w
+    w.set_title("Notifications")
+    w.set_name("ndnd")
+    w.set_decorated(False)
+   
+    w.set_default_size(main_win_width, main_win_min_height)
+    w.set_resizable(True)
+    w.set_geometry_hints(w, min_width=main_win_width,
+        min_height=main_win_min_height)
+    w.set_keep_above(True)
+    w.set_focus_on_map(False)
+    # gui_set_geom(w, wd)
+    # w.set_geometry_hints
+  
+    vbox = gtk.VBox(False, 0)
+    sw = gtk.ScrolledWindow()
+    sw.set_border_width(0)
+    sw.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+    sw.add_with_viewport(gui_main_list())
+    vbox.pack_start(sw, True, True, 0)
+    vbox.pack_start(gui_main_toolbar(), False, True, 0)
+    xx['sg'] = gtk.SizeGroup(gtk.SIZE_GROUP_HORIZONTAL)
+    w.add(vbox)
+    w.show_all()
+
+    return w
+
+
+#######################################################################
+# Status Icon                                                         #
+#######################################################################
+
+def gui_si_popup_menu_cb(si, button, time):
+    menu = gtk.Menu()
+    about = gtk.ImageMenuItem(gtk.STOCK_ABOUT)
+    quit = gtk.ImageMenuItem(gtk.STOCK_QUIT)
+    about.connect("activate", gui_si_about_dialog)
+    quit.connect("activate", gtk.main_quit)
+    menu.append(about)
+    menu.append(quit)
+    menu.show_all()
+    menu.popup(None, None, gtk.status_icon_position_menu,
+               button, time, xx['statusicon'])
+
+    
+def gui_si_about_dialog(widget):
+    about_dialog = gtk.AboutDialog()
+    about_dialog.set_destroy_with_parent(True)
+    about_dialog.set_name("ndnd")
+    about_dialog.set_version("1.0")
+    about_dialog.set_authors(["Anatoly Asviyan <aanatoly@gmail.com>"])
+    about_dialog.run()
+    about_dialog.destroy()
+
+    
+def gui_si_activate_cb(si):
+    log.debug("here")
+    if xx['main'] and xx['main'].flags() & gtk.MAPPED:
+        xx['main'].destroy()
+        xx['main'] = None
+    else:
+        gui_main()
+        msg_upd()
+
+
+def gui_si_upd():
+    log.debug("here")
+    icons = {
+        -1: "ndnd.png",
+        0: "ndnd-urgency-low.png",
+        1: "ndnd-urgency-normal.png",
+        2: "ndnd-urgency-critical.png",
+    }
+    log.debug("stat %s", xx['stat'])
+    icon = icons[xx['stat']['high']]
+    xx['statusicon'].set_from_file(IMG_DIR + icon)
+    ttip = ""
+    if xx['stat'][2]:
+        ttip += "%d critical\n" % xx['stat'][2]
+    if xx['stat'][1]:
+        ttip += "%d nnormal\n" % xx['stat'][1]
+    if xx['stat'][0]:
+        ttip += "%d low\n" % xx['stat'][0]
+    if not ttip:
+        ttip = "nothing new"
+    ttip = "Notofictions\n" + ttip
+    xx['statusicon'].set_tooltip(ttip)
+
+    
+def gui_si():
+    si = gtk.StatusIcon()
+    xx['statusicon'] = si
+    si.set_from_file(IMG_DIR + "ndnd.png")
+    si.connect("popup-menu", gui_si_popup_menu_cb)
+    si.connect("activate", gui_si_activate_cb)
+    si.set_tooltip("Notofictions")
+
+    
+#######################################################################
+# Main                                                                #
+#######################################################################
+
+    
+def main():
+    
+    # wd = gui()
+    # xwd = wd
+    # msg_upd(wd)
+    DBusGMainLoop(set_as_default=True)
+    xx['dbus'] = MyDBUSService(msg_add, msg_close, xx)
+    # gobject.timeout_add(5000, update_ts_delta, wd)
+    gui_si()
+    gtk.main()
+
+
+main()
+
