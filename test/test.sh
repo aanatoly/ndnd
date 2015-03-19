@@ -1,10 +1,11 @@
 #!/bin/bash
 
 
+send=libnotify-notify-send
 
 function battery()
 {
-    notify-send -a "sababa" --icon=battery-$1 -u $2 "battery $1"
+    $send -a "sababa" --icon=battery-$1 -u $2 "battery $1"
 }
 battery low critical
 battery good normal
