@@ -582,7 +582,16 @@ def gui_main_toolbar():
     tb.show_all()
     return tb
 
+def gui_main_pos(w):
+    si = xx['statusicon']
+    g = si.get_geometry()[1]
+    log.debug("geom %s", g)
+    scr = si.get_screen()
+    p = (scr.get_width(), scr.get_height())
+    log.debug("screen %s", p)
+    w.move(g[0], g[1])
 
+    
 def gui_main():
     w = gtk.Window(gtk.WINDOW_TOPLEVEL)
     xx['main'] = w
@@ -608,6 +617,7 @@ def gui_main():
     vbox.pack_start(gui_main_toolbar(), False, True, 0)
     xx['sg'] = gtk.SizeGroup(gtk.SIZE_GROUP_HORIZONTAL)
     w.add(vbox)
+    gui_main_pos(w)
     w.show_all()
 
     return w
@@ -641,7 +651,6 @@ def gui_si_about_dialog(widget):
 
     
 def gui_si_activate_cb(si):
-    log.debug("here")
     if xx['main'] and xx['main'].flags() & gtk.MAPPED:
         xx['main'].destroy()
         xx['main'] = None
