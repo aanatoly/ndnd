@@ -516,6 +516,7 @@ IMG_DIR = 'images/'
 xx = {
     'main': None,
     'msgs': [],
+    'hide_tout': 0,
 }
 
 
@@ -591,10 +592,35 @@ def gui_main_pos(w):
     log.debug("screen %s", p)
     w.move(g[0], g[1])
 
+
+def hide_cb():
+    log.debug("hide main win")
+    xx['main'].destroy()
+    xx['main'] = None
+    xx['hide_tout'] = 0
+    return False
+
     
+def enter_cb(widget, event):
+    mno = len(xx['msgs'])
+    et = event.type
+    log.debug("mno %d, event %s", mno, et)
+    if event.type == gtk.gdk.LEAVE_NOTIFY and mno == 0:
+        log.debug("start hide tout")
+        xx['hide_tout'] = glib.timeout_add(400, hide_cb)
+    elif event.type == gtk.gdk.ENTER_NOTIFY and xx['hide_tout']:
+        log.debug("stop hide tout %d", xx['hide_tout'])
+        glib.source_remove(xx['hide_tout'])
+        xx['hide_tout'] = 0
+            
+
+
+        
 def gui_main():
     w = gtk.Window(gtk.WINDOW_TOPLEVEL)
     xx['main'] = w
+    w.connect("leave-notify-event", enter_cb)
+    w.connect("enter-notify-event", enter_cb)
     w.set_title("Notifications")
     w.set_name("ndnd")
     w.set_decorated(False)
