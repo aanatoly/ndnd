@@ -595,7 +595,8 @@ def gui_main_pos(w):
 
 def hide_cb():
     log.debug("hide main win")
-    xx['main'].destroy()
+    if xx['main']:
+        xx['main'].destroy()
     xx['main'] = None
     xx['hide_tout'] = 0
     return False
